@@ -1,5 +1,7 @@
 const Station = require('../models/Station');
 const SensorNode = require('../models/SensorNode');
+const AlertLog = require('../models/AlertLog');
+const SystemLog = require('../models/SystemLog');
 
 // @desc    Créer une nouvelle station
 exports.createStation = async (req, res) => {
@@ -93,6 +95,33 @@ exports.deleteStation = async (req, res) => {
     }
 };
 
+// @desc    Obtenir l'état complet d'une station (Capteurs + Nœuds)
+exports.getStationStatus = async (req, res) => {
+    try {
+        const station = await Station.findOne({ hardwareId: req.params.hardwareId });
+        if (!station) {
+            return res.status(404).json({ message: 'Station non trouvée' });
+        }
+
+        // Récupérer les nœuds associés (ceux qui ont cette station comme parent)
+        const nodes = await SensorNode.find({ parentStation: station.hardwareId });
+        
+        // Formater les nœuds pour le frontend
+        const nodesData = nodes.reduce((acc, node) => {
+            acc[node.nodeHardwareId] = node.sensors;
+            return acc;
+        }, {});
+
+        res.json({
+            station: station.sensors,
+            nodes: nodesData,
+            lastUpdate: station.updatedAt
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Obtenir les détails d'un nœud capteur (pour la modale admin)
 exports.getNodeDetails = async (req, res) => {
     try {
@@ -102,6 +131,42 @@ exports.getNodeDetails = async (req, res) => {
         } else {
             res.status(404).json({ message: 'Nœud non trouvé' });
         }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Obtenir les statistiques consolidées pour le Dashboard Utilisateur
+exports.getDashboardStats = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // 1. Stations de l'utilisateur
+        const stations = await Station.find({ owner: userId });
+        const stationsCount = stations.length;
+
+        // 2. Nombre total de nœuds capteurs déclarés dans ces stations
+        const nodesCount = stations.reduce((acc, s) => acc + (s.sensorNodes?.length || 0), 0);
+
+        // 3. Compte exact des alertes non vues dans la base de données
+        const unseenAlerts = await AlertLog.countDocuments({ userId, isSeen: false });
+
+        // 4. Compte exact des événements système non vus
+        const stationIds = stations.map(s => s.hardwareId);
+        const unseenSystemLogs = await SystemLog.countDocuments({
+            $or: [
+                { stationId: { $in: stationIds } },
+                { userId }
+            ],
+            isSeen: false
+        });
+
+        res.json({
+            stationsCount,
+            nodesCount,
+            unseenAlerts,
+            unseenSystemLogs
+        });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

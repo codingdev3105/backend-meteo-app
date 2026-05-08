@@ -6,15 +6,31 @@ const generateToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
 };
 
+const mongoose = require('mongoose');
+
 // @desc    Authentifier utilisateur & obtenir token
 // @route   POST /api/auth/login
 exports.login = async (req, res) => {
     const { username, password } = req.body;
 
+    // Vérifier si la base de données est connectée
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ message: 'Service de base de données indisponible. Vérifiez votre connexion.' });
+    }
+
     try {
+        console.log(`🔑 Tentative de connexion pour: ${username}`);
         const user = await User.findOne({ username }).select('+password');
         
-        if (user && (await user.matchPassword(password))) {
+        if (!user) {
+            console.log(`❌ Utilisateur non trouvé: ${username}`);
+            return res.status(401).json({ message: 'Nom d\'utilisateur incorrect' });
+        }
+
+        const isMatch = await user.matchPassword(password);
+        console.log(`📊 Comparaison mot de passe: ${isMatch ? '✅ MATCH' : '❌ NO MATCH'}`);
+
+        if (isMatch) {
             user.lastAccess = Date.now();
             await user.save();
 
@@ -64,6 +80,11 @@ exports.getAllUsers = async (req, res) => {
 // @route   POST /api/auth/register
 exports.register = async (req, res) => {
     const { username, email, password, role, phoneNumber } = req.body;
+    
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ message: 'Service de base de données indisponible. Veuillez réessayer plus tard.' });
+    }
+
     try {
         const userExists = await User.findOne({ $or: [{ email }, { username }] });
         if (userExists) {

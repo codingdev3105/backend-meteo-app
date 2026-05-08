@@ -121,40 +121,67 @@ exports.getLogTypes = async (req, res) => {
 const checkAlerts = async (stationId, data, sourceLabel) => {
     try {
         const alerts = await Alert.find({ stationId, isActive: true });
-        // Charger le catalogue pour faire la correspondance Nom -> Abréviation
         const catalogue = await Sensor.find();
 
+        // Bibliothèque de secours si le catalogue DB est vide ou incomplet
+        const fallbackMap = {
+            'Température': 't',
+            'Humidité': 'h',
+            'Pression': 'p',
+            'Gaz': 'g',
+            'Luminosité': 'lum',
+            'Humidité Sol': 'sol',
+            'temperature': 't',
+            'humidity': 'h'
+        };
+
         for (const alert of alerts) {
-            // Trouver l'abréviation technique correspondant au nom stocké dans l'alerte
-            const sensorDef = catalogue.find(s => s.name === alert.sensorType);
-            const technicalKey = sensorDef ? sensorDef.abbreviation : alert.sensorType;
-            
-            const sensorValue = data[technicalKey];
+            // 1. Tenter de trouver le capteur dans le catalogue (par nom, ID ou même abréviation)
+            const sensorDef = catalogue.find(s => 
+                s.name?.toLowerCase() === alert.sensorType?.toLowerCase() || 
+                s.sensorId?.toLowerCase() === alert.sensorType?.toLowerCase() ||
+                s.abbreviation?.toLowerCase() === alert.sensorType?.toLowerCase()
+            );
+
+            let technicalKey = alert.sensorType;
+            if (sensorDef && sensorDef.abbreviation) {
+                technicalKey = sensorDef.abbreviation;
+            } else if (fallbackMap[alert.sensorType]) {
+                technicalKey = fallbackMap[alert.sensorType];
+            }
+
+            // Recherche de la clé dans les données reçues (insensible à la casse, ex: 't' vs 'T')
+            const dataKey = Object.keys(data).find(k => k.toLowerCase() === technicalKey.toLowerCase());
+            const sensorValue = dataKey !== undefined ? data[dataKey] : undefined;
+
             if (sensorValue !== undefined) {
                 let isTriggered = false;
-                if (alert.operator === '>' && sensorValue > alert.thresholdValue) isTriggered = true;
-                if (alert.operator === '<' && sensorValue < alert.thresholdValue) isTriggered = true;
+                const val = parseFloat(sensorValue);
+                const threshold = parseFloat(alert.thresholdValue);
+
+                if (alert.operator === '>' && val > threshold) isTriggered = true;
+                if (alert.operator === '<' && val < threshold) isTriggered = true;
 
                 if (isTriggered) {
-                    // Créer un log d'alerte avec le lien alertId
+                    const alertTitle = alert.name || alert.sensorType;
+                    // Créer le log d'alerte simplifié
                     await AlertLog.create({
                         userId: alert.userId,
-                        alertId: alert._id, // Lien vers le seuil
+                        alertId: alert._id,
                         stationId,
                         sensorType: alert.sensorType,
-                        triggeredValue: sensorValue,
-                        thresholdValue: alert.thresholdValue,
-                        message: `Alerte sur ${sourceLabel} : ${alert.sensorType} (${sensorValue}) ${alert.operator} seuil (${alert.thresholdValue})`
+                        triggeredValue: val,
+                        thresholdValue: threshold,
+                        message: `Alerte sur ${sourceLabel} : ${alertTitle}`
                     });
-                    
-                    // Mettre à jour la date de dernier déclenchement
+
                     alert.lastTriggered = new Date();
                     await alert.save();
                 }
             }
         }
     } catch (err) {
-        console.error("Erreur Moteur Alertes:", err);
+        console.error("❌ Erreur Moteur Alertes:", err);
     }
 };
 
@@ -183,12 +210,20 @@ exports.collectData = async (req, res) => {
             if (stationData) {
                 for (const abbr of Object.keys(stationData)) {
                     const cleanAbbr = abbr.trim();
-                    const s = await Sensor.findOne({ abbreviation: { $regex: new RegExp(`^${cleanAbbr}$`, 'i') } });
-                    if (s) {
-                        // Utilisation de addToSet (manuel ici pour garder l'instance station)
-                        if (!station.sensors.includes(s.sensorId)) {
-                            station.sensors.push(s.sensorId);
-                        }
+                    let s = await Sensor.findOne({ abbreviation: { $regex: new RegExp(`^${cleanAbbr}$`, 'i') } });
+                    
+                    if (!s) {
+                        // Création automatique si le capteur est nouveau pour la base
+                        const defaults = { 't': 'Température', 'h': 'Humidité', 'p': 'Pression', 'g': 'Gaz', 'lum': 'Luminosité', 'sol': 'Humidité Sol' };
+                        s = await Sensor.create({
+                            sensorId: cleanAbbr.toUpperCase(),
+                            abbreviation: cleanAbbr,
+                            name: defaults[cleanAbbr.toLowerCase()] || `Capteur ${cleanAbbr.toUpperCase()}`
+                        });
+                    }
+
+                    if (!station.sensors.includes(s.sensorId)) {
+                        station.sensors.push(s.sensorId);
                     }
                 }
                 await checkAlerts(stationId, stationData, "Hub Central");
@@ -214,15 +249,24 @@ exports.collectData = async (req, res) => {
                     const receivedSensorAbbrs = Object.keys(node.sensors || {});
                     for (const abbr of receivedSensorAbbrs) {
                         const cleanAbbr = abbr.trim();
-                        const sensorType = await Sensor.findOne({ abbreviation: { $regex: new RegExp(`^${cleanAbbr}$`, 'i') } });
-                        if (sensorType) {
-                            if (!nodeDef.sensors.includes(sensorType.sensorId)) {
-                                nodeDef.sensors.push(sensorType.sensorId);
-                                await nodeDef.save();
-                            }
-                            if (!station.sensors.includes(sensorType.sensorId)) {
-                                station.sensors.push(sensorType.sensorId);
-                            }
+                        let sensorType = await Sensor.findOne({ abbreviation: { $regex: new RegExp(`^${cleanAbbr}$`, 'i') } });
+                        
+                        if (!sensorType) {
+                            // Création automatique si le capteur est nouveau
+                            const defaults = { 't': 'Température', 'h': 'Humidité', 'p': 'Pression', 'g': 'Gaz', 'lum': 'Luminosité', 'sol': 'Humidité Sol' };
+                            sensorType = await Sensor.create({
+                                sensorId: cleanAbbr.toUpperCase(),
+                                abbreviation: cleanAbbr,
+                                name: defaults[cleanAbbr.toLowerCase()] || `Capteur ${cleanAbbr.toUpperCase()}`
+                            });
+                        }
+
+                        if (!nodeDef.sensors.includes(sensorType.sensorId)) {
+                            nodeDef.sensors.push(sensorType.sensorId);
+                            await nodeDef.save();
+                        }
+                        if (!station.sensors.includes(sensorType.sensorId)) {
+                            station.sensors.push(sensorType.sensorId);
                         }
                     }
                     await checkAlerts(stationId, node.sensors, `Nœud ${cleanNodeId}`);
@@ -238,6 +282,7 @@ exports.collectData = async (req, res) => {
 
         res.status(201).json({ success: true, measureId: newMeasure._id });
     } catch (error) {
+        console.error("❌ ERREUR dans collectData:", error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -259,40 +304,54 @@ exports.getLatestStatus = async (req, res) => {
         // Charger le dictionnaire des capteurs
         const catalogue = await Sensor.find();
         const dict = {};
+        
+        // Bibliothèque de métadonnées enrichie
+        const metadata = {
+            't': { unit: '°C', icon: 'Thermometer', color: '#10b981' },
+            'h': { unit: '%', icon: 'Droplets', color: '#3b82f6' },
+            'p': { unit: 'hPa', icon: 'Gauge', color: '#8b5cf6' },
+            'g': { unit: 'ppm', icon: 'Activity', color: '#f59e0b' },
+            'lum': { unit: 'Lux', icon: 'Sun', color: '#eab308' },
+            'sol': { unit: '%', icon: 'Droplets', color: '#065f46' },
+            'bat': { unit: 'V', icon: 'Battery', color: '#ef4444' }
+        };
+
         catalogue.forEach(s => {
-            // On stocke en minuscule dans le dictionnaire de traduction pour le matching flexible
-            dict[s.abbreviation.toLowerCase()] = { name: s.name, id: s.sensorId, originalAbbr: s.abbreviation };
+            const lowAbbr = s.abbreviation.toLowerCase();
+            dict[lowAbbr] = { 
+                name: s.name, 
+                id: s.sensorId, 
+                originalAbbr: s.abbreviation,
+                ...(metadata[lowAbbr] || { unit: '', icon: 'Gauge', color: '#64748b' })
+            };
         });
 
         let status = { 
             station: {}, 
             nodes: {},
+            lastUpdates: {
+                hub: null,
+                nodes: {}
+            },
             sensorLibrary: dict,
             lastUpdate: measures[0].createdAt 
         };
 
+        // On parcourt de la plus ancienne à la plus récente pour fusionner les états
         [...measures].reverse().forEach(m => {
-            if (m.stationData) {
+            if (m.stationData && Object.keys(m.stationData).length > 0) {
                 Object.entries(m.stationData).forEach(([abbr, val]) => {
-                    const lowAbbr = abbr.toLowerCase();
-                    const info = dict[lowAbbr];
-                    status.station[lowAbbr] = {
-                        value: val,
-                        name: info ? info.name : abbr
-                    };
+                    status.station[abbr.toLowerCase()] = val;
                 });
+                status.lastUpdates.hub = m.createdAt;
             }
-            if (m.sensorNodesData) {
+            if (m.sensorNodesData && m.sensorNodesData.length > 0) {
                 m.sensorNodesData.forEach(node => {
                     if (!status.nodes[node.nodeId]) status.nodes[node.nodeId] = {};
                     Object.entries(node.sensors || {}).forEach(([abbr, val]) => {
-                        const lowAbbr = abbr.toLowerCase();
-                        const info = dict[lowAbbr];
-                        status.nodes[node.nodeId][lowAbbr] = {
-                            value: val,
-                            name: info ? info.name : abbr
-                        };
+                        status.nodes[node.nodeId][abbr.toLowerCase()] = val;
                     });
+                    status.lastUpdates.nodes[node.nodeId] = m.createdAt;
                 });
             }
         });
@@ -333,6 +392,32 @@ exports.getHistory = async (req, res) => {
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
+};
+
+// @desc    Obtenir les logs système filtrés pour l'utilisateur
+exports.getSystemLogs = async (req, res) => {
+    try {
+        const userStations = await Station.find({ owner: req.user._id });
+        const stationIds = userStations.map(s => s.hardwareId);
+
+        const logs = await SystemLog.find({
+            $or: [
+                { stationId: { $in: stationIds } },
+                { userId: req.user._id }
+            ]
+        })
+        .sort({ createdAt: -1 })
+        .limit(100);
+
+        res.json(logs);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Obtenir les types de logs disponibles
+exports.getLogTypes = async (req, res) => {
+    res.json(['INFO', 'WARNING', 'CRITICAL', 'SUCCESS']);
 };
 
 // @desc    Marquer tous les logs système comme vus

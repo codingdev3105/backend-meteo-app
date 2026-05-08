@@ -8,8 +8,10 @@ router.use(protect);
 
 router.get('/all', admin, stationController.getAllStations);
 router.post('/register', stationController.createStation);
+router.get('/stats', stationController.getDashboardStats);
 router.get('/', stationController.getUserStations);
 router.get('/:hardwareId', stationController.getStationByHardwareId);
+router.get('/:hardwareId/status', stationController.getStationStatus);
 router.put('/:id', stationController.updateStation);
 router.get('/node/:nodeId', stationController.getNodeDetails);
 router.delete('/:id', stationController.deleteStation);

@@ -37,6 +37,7 @@ const userSchema = new mongoose.Schema({
 // Crypter le mot de passe avant de sauvegarder
 userSchema.pre('save', async function() {
     if (!this.isModified('password')) return;
+    console.log(`🔒 Hachage du mot de passe pour: ${this.username}`);
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
 });

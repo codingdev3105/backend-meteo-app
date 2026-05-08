@@ -54,6 +54,7 @@ app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/sensors', require('./routes/sensorRoutes'));
 app.use('/api/docs', require('./routes/adminDocsRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
+app.use('/api/cron', require('./routes/cronRoutes'));
 
 // Route de base
 app.get('/', (req, res) => {

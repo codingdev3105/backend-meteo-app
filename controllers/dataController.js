@@ -198,7 +198,7 @@ exports.collectData = async (req, res) => {
             stationData,
             sensorNodesData
         });
-
+        console.log(newMeasure);
         // --- MOTEUR D'ALERTES & AUTO-ENREGISTREMENT ---
         const station = await Station.findOne({ hardwareId: stationId });
         

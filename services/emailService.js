@@ -1,11 +1,16 @@
 const nodemailer = require('nodemailer');
 
+// Vérification des variables d'environnement
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error("❌ ERREUR : EMAIL_USER ou EMAIL_PASS n'est pas défini dans les variables d'environnement !");
+}
+
 // Configuration du transporteur Gmail
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS // Utilisez un "Mot de passe d'application" Gmail
+        pass: process.env.EMAIL_PASS
     }
 });
 

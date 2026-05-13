@@ -1,0 +1,16 @@
+name: Station Status Checker
+
+on:
+  schedule:
+    # S'exécute toutes les 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Permet de lancer la tâche manuellement depuis GitHub
+
+jobs:
+  ping-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Station Status API
+        run: |
+          curl -X GET "https://backend-meteo-app.vercel.app/api/cron/check-status" \
+          -H "Content-Type: application/json"

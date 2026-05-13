@@ -11,9 +11,10 @@ exports.helloStation = async (req, res) => {
         const station = await Station.findOne({ hardwareId: stationId });
         
         await SystemLog.create({
-            type: 'SUCCESS', // Pour que ce soit vert dans le journal
+            type: 'SUCCESS',
             event: 'STATION_CONNECTED',
             stationId,
+            userId: station ? station.owner : null, // On lie le log à l'utilisateur
             message: `Connexion établie : La station ${station ? station.name : stationId} est maintenant en ligne.`
         });
 

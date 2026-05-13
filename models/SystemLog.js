@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const SystemLogSchema = new mongoose.Schema({
     type: {
         type: String,
-        enum: ['INFO', 'WARNING', 'CRITICAL', 'STATION', 'AUTH'],
+        enum: ['INFO', 'WARNING', 'CRITICAL', 'STATION', 'AUTH', 'SUCCESS'],
         default: 'INFO'
     },
     event: {

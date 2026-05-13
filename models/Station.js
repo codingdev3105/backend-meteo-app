@@ -15,8 +15,9 @@ const stationSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    // Position géographique (Objet avec Lat/Lng) - Ver: 1.1
     location: {
-        lat: { type: Number, default: 36.7525 }, // Coordonnées par défaut (ex: Alger)
+        lat: { type: Number, default: 36.7525 },
         lng: { type: Number, default: 3.04197 }
     },
     status: {
